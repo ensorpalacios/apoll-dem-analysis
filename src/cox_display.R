@@ -19,6 +19,7 @@ library(tidyverse)
 library(here)
 library(finalfit)
 library(survival)
+library("survminer")
 library(coxme)
 library(stargazer)
 
@@ -26,19 +27,27 @@ source(paste0(here(), '/src/forest_plot.R'))
 
 # Load Data -------------------------------------------------------------------
 data_path <- str_glue('{here()}/output/results/cox/savedata/')
-list_fit_all <- readRDS(file = paste0(data_path, 'fits.rds'))
-list_aic_all <- readRDS(file = paste0(data_path, 'aic.rds'))
-list_test_all <- readRDS(file = paste0(data_path, 'tests.rds'))
-list_spline_all <- readRDS(file = paste0(data_path, 'spline.rds'))
+list_fit <- readRDS(file = paste0(data_path, 'fits.rds'))
+list_aic <- readRDS(file = paste0(data_path, 'aic.rds'))
+list_test <- readRDS(file = paste0(data_path, 'tests.rds'))
+list_spline <- readRDS(file = paste0(data_path, 'spline.rds'))
+
+list_fit %>% names
+list_fit[['model5_dem_s_appc_appc']] %>% summary
+list_fit[['model1_dem_s_appc']] %>% summary
+ggcoxzph(list_test[['model1_dem_s_pm10']])
+list_test[['model1_dem_s_pm25']]
+
+list_fit[['model5_dem_s_appc_appc']] %>% str
 
 # Discard empty elements in lists
-list_fit_all <- list_fit_all[list_fit_all %>% names %>% complete.cases]
-list_aic_all <- list_aic_all[list_aic_all %>% names %>% complete.cases]
-list_test_all <- list_test_all[list_test_all %>% names %>% complete.cases]
-list_spline_all <- list_spline_all[list_spline_all %>% names %>% complete.cases]
+list_fit <- list_fit[list_fit %>% names %>% complete.cases]
+list_aic <- list_aic[list_aic %>% names %>% complete.cases]
+list_test <- list_test[list_test %>% names %>% complete.cases]
+list_spline <- list_spline[list_spline %>% names %>% complete.cases]
 
 # Drop models with all pollutants for forest plots
-list_forest <- list_fit_all[!grepl('all', names(list_fit_all))]
+list_forest <- list_fit[!grepl('all', names(list_fit))]
 
 # Exclude drop_var from aggregate tables
 drop_var <- c('age', 'sex', 'ethnic', '\\bea\\b', 'income', 'pop_density', 'tdi', 'md') %>% 
@@ -46,11 +55,15 @@ drop_var <- c('age', 'sex', 'ethnic', '\\bea\\b', 'income', 'pop_density', 'tdi'
 
 # Plot and save forest plots --------------------------------------------------
 # Aggregate air pollutant HR 
-list_aggregate <- as.list(rep(NA, 23))
+list_aggregate <- as.list(rep(NA, 50))
 idx = 1
 
-# Aggregate across pollutants (model 1-17)
-for (model in as.character(1:5)) {
+# Aggregate across pollutants
+# model 1: main
+# model 2: main_eng
+# model 3: + mdi_eng
+# model 4: Mundalak rec_centre
+for (model in as.character(1:4)) {
     for (outcome in c('dem', 'ad', 'vd')) {
         for (ap_unit in c('s', 'q')) {
             idx_cat <- grep(str_glue('model{model}_{outcome}_{ap_unit}'), names(list_forest))
@@ -75,8 +88,8 @@ for (model in as.character(1:5)) {
     }
 }
 
-# Aggregate across air pollutant units (scaled by IQR and quartiles; model 18-23) 
-# Only for model 1 and 2
+# Aggregate across air pollutant units (scaled by IQR and quartiles)
+# Only for model 1-3
 combine_aptype <- function(x) {
     idx_combine <- grep(x, names(list_aggregate))
     new_order <- order(c(2,3,4, # pm25_q
@@ -96,14 +109,22 @@ combine_aptype <- function(x) {
     table_ordered
 }
 
-name_au <- map(c('1', '2'), 
+name_au <- map(c('1', '2', '3'), 
                function(x) map(c('dem', 'ad', 'vd'), 
                                function(y) str_glue('model{x}_{y}'))) %>% unlist
 
-names(list_aggregate)[17 + 1:6] <- map(1:6, # model >17 save _s and _q combined
-                                       function(x) names(list_aggregate)[[17 + x]] <- name_au[x])
-list_aggregate[17 + 1:6] <- map(1:6, 
-                                function(x) list_aggregate[[17 + x]] <- combine_aptype(name_au[x]))
+names(list_aggregate)[21 + 1:9] <- map(1:9, # model >17 save _s and _q combined
+                                       function(x) names(list_aggregate)[[21 + x]] <- name_au[x])
+list_aggregate[21 + 1:9] <- map(1:9, 
+                                function(x) list_aggregate[[21 + x]] <- combine_aptype(name_au[x]))
+
+list_aggregate <- list_aggregate[ list_aggregate %>% names %>% complete.cases]
+
+# Add 'all' models (with all single pollutants in one model) to list_aggregate
+list_fit_all <- list_fit[grepl('all', names(list_fit))]
+list_fit_all <- map(list_fit_all, finalfit::fit2df, condense = F)
+list_fit_all <- map(list_fit_all, ~ .x[!grepl(drop_var, .x$explanatory), ])
+list_aggregate <- c(list_aggregate, list_fit_all)
 
 # Plot forests
 save_forest <-  here(str_glue('output/results/cox/display/forests/'))
@@ -111,7 +132,7 @@ if (!file.exists(save_forest)) {
     dir.create(save_forest, recursive = TRUE)
 }
 
-walk(13:23, # model1-2 with _s and _q combined
+walk(19:length(list_aggregate), # model1-2 with _s and _q combined
      function (x) plot_forest(list_aggregate[[x]],
                               str_glue('{save_forest}{names(list_aggregate)[[x]]}')))
 
@@ -120,8 +141,8 @@ save_table <-  here(str_glue('output/results/cox/display/tables/'))
 if (!file.exists(save_table)) {
     dir.create(save_table, recursive = TRUE)
 }
-name_tables <- list_fit_all %>% names
-walk(.x = name_tables, ~ finalfit::fit2df(list_fit_all[[.x]], condense = F) %>%
+name_tables <- list_fit %>% names
+walk(.x = name_tables, ~ finalfit::fit2df(list_fit[[.x]], condense = F) %>%
          mutate(# Recode p-value
                 'p-value' = case_when(
                                       p < 0.001 ~ '<0.001',
@@ -146,11 +167,11 @@ walk(.x = name_tables, ~ finalfit::fit2df(list_fit_all[[.x]], condense = F) %>%
          kable_styling(latex_options = "striped") %>% 
          kableExtra::save_kable(str_glue('{save_table}{.x}.tex')))
 
-#map(grep('model5', name_tables), ~ ranef(list_fit_all[[.x]])) %>% rbindlist
+#map(grep('model5', name_tables), ~ ranef(list_fit[[.x]])) %>% rbindlist
 
 # Plot splines ----------------------------------------------------------------
-attributes(list_spline_all[[1]])
-df_spline <- list_spline_all[[1]]$appc
+attributes(list_spline[[1]])
+df_spline <- list_spline[[1]]$appc
 center <- with(df_spline, y[x == min(x)])
 ytemp <- exp(df_spline[['y']] + outer(df_spline[['se']], c(0, -1, 1), '*'))
 #ytemp <- df_spline[['y']] + outer(df_spline[['se']], c(0, -1, 1), '*')
@@ -242,7 +263,7 @@ filter_fit <- funciont(x, idx) {
     list_x_f = as.list(rep(NA, 6))
     idx_ap = 1
     for (apoll in c('pm_25', 'pm_coarse', 'pm_abs', 'pm_10', 'no_2', 'no_x')) {
-             list_x_f[[idx_ap]] <- list_fit_all[[str_glue('x_{apoll}')]] %>%
+             list_x_f[[idx_ap]] <- list_fit[[str_glue('x_{apoll}')]] %>%
                  finalfit::fit2df() %>%
                  .[mask[idx], ]
              names(list_x_f)[idx_ap] = apoll
@@ -250,18 +271,18 @@ filter_fit <- funciont(x, idx) {
     }
     list_x_f
 }
-2*(list_fit_all[['fit1_s_pm_25']]$loglik - list_fit_all[['fit1_q_pm_25']]$loglik)[2]
+2*(list_fit[['fit1_s_pm_25']]$loglik - list_fit[['fit1_q_pm_25']]$loglik)[2]
                          
-    x_m <- list_fit_all[[x]]
+    x_m <- list_fit[[x]]
 for (model in as.character(1:(n_model + n_model_ml))) {
     if (idx < n_model * 2 + 1) { # unilevel models
         for (ap_unit in c('s', 'q')) {
             coxfit <- str_glue('fit{model}_{ap_unit}')
             # Merge
-            df_pm_25 <- > list_fit_all[[str_glue('{coxfit}_pm_25')]] %>% 
+            df_pm_25 <- > list_fit[[str_glue('{coxfit}_pm_25')]] %>% 
                 finalfit::fit2df()
             assign(df_name,
-                   rbind(list_fit_all[[str_glue('{coxfit}_pm_25')]][mask, ],
+                   rbind(list_fit[[str_glue('{coxfit}_pm_25')]][mask, ],
                          get(str_glue('{coxfit}_pm_coarse'))[mask, ],
                          get(str_glue('{coxfit}_pm_abs'))[mask, ],
                          get(str_glue('{coxfit}_pm_10'))[mask, ],
@@ -271,7 +292,7 @@ for (model in as.character(1:(n_model + n_model_ml))) {
             )
             # Results cox fit
             file_name <- str_glue('{save_path}tbl_{coxfit}.tex')
-            list_fit_all[[coxfit]] %>% 
+            list_fit[[coxfit]] %>% 
                 finalfit::fit2df() %>%
                 knitr::kable(format = 'latex') %>% 
                 kableExtra::save_kable(file_name)
@@ -282,7 +303,7 @@ for (model in as.character(1:(n_model + n_model_ml))) {
         coxfit <- str_glue('fit{model}_{apoll}')
         # Results cox fit
         file_name <- str_glue('{save_path}tbl_{coxfit}.tex')
-        list_fit_all[[coxfit]] %>% 
+        list_fit[[coxfit]] %>% 
             finalfit::fit2df() %>%
             knitr::kable(format = 'latex') %>% 
             kableExtra::save_kable(file_name)

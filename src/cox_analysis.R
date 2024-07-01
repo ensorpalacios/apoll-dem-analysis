@@ -36,7 +36,7 @@ source(paste0(here(), '/src/select.R'))
 
 # Load and select data --------------------------------------------------------
 # Selection parameters
-address_buff <- 0 # discard participants with < x years at baseline address
+address_buff <- 1 # discard participants with < x years at baseline address
 dem_buff <- 0 # discard participants with dem incidence < x years after baseline
 drop_nowhite <- F # restrict analysis to 'white'
 list_covariates <- c('age', # for main model (2)
@@ -44,8 +44,7 @@ list_covariates <- c('age', # for main model (2)
                      'ethnic', 
                      'ea',
                      'income', # causes ~ 70k to drop!
-                     'pop_density', 
-                     'tdi_q')
+                     'pop_density')
 # Get data
 data_path <- paste0(here(), '/data/processed/df_ukbb.rds')
 df_all <- readRDS(file = data_path)
@@ -63,35 +62,38 @@ tscale <- 'years'
 for (outcome in c('dem', 'ad', 'vd')) {
     ap_var = paste0('date_', outcome)
     df_sel <- df_sel %>% mutate('time_{outcome}' := pmin(get(ap_var),
-                                                 date_lost_fu,
-                                                 date_death,
-                                                 end_study,
-                                                 na.rm = T) - date_baseline,
-                        'time_{outcome}' := time_length(get(str_glue('time_{outcome}')), tscale),
-                        'status_{outcome}' := case_when(get(ap_var) <= end_study ~ 1L,
-                                                        get(ap_var) > end_study ~ 0L,
-                                                        is.na(get(ap_var)) ~ 0L)
+                                                         date_lost_fu,
+                                                         date_death,
+                                                         end_study,
+                                                         na.rm = T) - date_baseline,
+                                'time_{outcome}' := time_length(get(str_glue('time_{outcome}')), tscale),
+                                'status_{outcome}' := case_when(get(ap_var) <= end_study ~ 1L,
+                                                                get(ap_var) > end_study ~ 0L,
+                                                                is.na(get(ap_var)) ~ 0L)
     )
 }
 
 # Run analysis and save in lists ----------------------------------------------
+# Analysis involve:
 # - Fit Cox model
 # - Compute AIC
 # - Run proportionality test
 # - Plot spline fit
-list_fit <- as.list(rep(NA, 500))
+
+# Setup lists and parameters
+list_fit <- as.list(rep(NA, 500)) # initialise lists with enough elements
 list_aic <- as.list(rep(NA, 500))
 list_test <- as.list(rep(NA, 500))
 list_spline <- as.list(rep(NA, 500))
 idx <- 1 # global index for list_fit and list_test; run models in order!
 ap_list <- c('pm25', 'pmcoarse', 'pmabs', 'pm10', 'no2', 'nox')
 ap_all <- c('pm25', 'pmcoarse', 'pmabs', 'pm10', 'no2', 'nox', 'all', 'appc')
- 
+
 # (1) Main model
 for (outcome in c('dem', 'ad', 'vd')) {
     for (ap_type in ap_all) {
         for (ap_unit in c('s', 'q')) {
-            # set apoll for cox formula
+            # Define exposure
             if (ap_type== 'all') { # For model with all ap included
                 apoll <- paste(paste0(ap_list, str_glue('_{ap_unit}')),
                                collapse = ' + ')
@@ -101,7 +103,7 @@ for (outcome in c('dem', 'ad', 'vd')) {
                 apoll <- ap_type
             }
 
-            if (!(ap_type == 'appc' & ap_unit == 'q')) { # do not run for appc-q
+            if (!(ap_type == 'appc' & ap_unit == 'q')) { # do not run for appc-q (not existing)
                 # Define Model
                 model <- str_glue('Surv(time_{outcome}, status_{outcome}) ~ 
                                   age + 
@@ -134,11 +136,12 @@ for (outcome in c('dem', 'ad', 'vd')) {
     }
 }
 
-# (2) Main model + tdi quartiles
+# (2) Main model - restricted to England to compare with model (3) including mdi_eng
+df_sel_eng <- df_sel[df_sel$mdi_eng %>% complete.cases, ]
 for (outcome in c('dem', 'ad', 'vd')) {
     for (ap_type in ap_all) {
         for (ap_unit in c('s', 'q')) {
-            # set apoll for cox formula
+            # Define exposure
             if (ap_type== 'all') { # For model with all ap included
                 apoll <- paste(paste0(ap_list, str_glue('_{ap_unit}')),
                                collapse = ' + ')
@@ -148,7 +151,7 @@ for (outcome in c('dem', 'ad', 'vd')) {
                 apoll <- ap_type
             }
 
-            if (!(ap_type == 'appc' & ap_unit == 'q')) { # do not run for appc-q
+            if (!(ap_type == 'appc' & ap_unit == 'q')) { # do not run for appc-q (not existing)
                 # Define Model
                 model <- str_glue('Surv(time_{outcome}, status_{outcome}) ~ 
                                   age + 
@@ -157,12 +160,11 @@ for (outcome in c('dem', 'ad', 'vd')) {
                                   ea + 
                                   income + 
                                   pop_density +
-                                  tdi_q +
                                   {apoll}')
                 model <- as.formula(model)
 
                 # Fit and save model
-                fit <- coxph(model, data = df_sel, method = 'efron')
+                fit <- coxph(model, data = df_sel_eng, method = 'efron')
                 name <- str_glue('model2_{outcome}_{ap_unit}_{ap_type}')
                 list_fit[[idx]] <- fit
                 names(list_fit)[idx] <- name
@@ -182,82 +184,51 @@ for (outcome in c('dem', 'ad', 'vd')) {
     }
 }
 
+# (3) Area level covariates: multiple deprivation index quartiles (England)
+for (outcome in c('dem', 'ad', 'vd')) {
+    for (ap_type in ap_all) {
+        for (ap_unit in c('s', 'q')) {
+            # Define exposure
+            if (ap_type== 'all') { # For model with all ap included
+                apoll <- paste(paste0(ap_list, str_glue('_{ap_unit}')),
+                               collapse = ' + ')
+            } else if (ap_type %in% ap_list) { # for single pollutant models (not existing)
+                apoll = str_glue('{ap_type}_{ap_unit}')
+            } else { # for appc
+                apoll <- ap_type
+            }
 
-# (3) Area level covariates: tdi quartiles (England)
-# for comparison only with model 4: restrict analysis 
-# to single ap quartiles and all cause dementia
-df_eng <- df_sel[df_sel$mdi_eng %>% complete.cases, ]
-for (outcome in c('dem')) {
-    for (ap_type in ap_all[c(-7, -8)]) {
-        for (ap_unit in c('q')) {
-            # set apoll for cox formula
-            apoll = str_glue('{ap_type}_{ap_unit}')
+            if (!(ap_type == 'appc' & ap_unit == 'q')) { # do not run for appc-q (not existing)
+                # Define Model
+                model <- str_glue('Surv(time_{outcome}, status_{outcome}) ~ 
+                                  age + 
+                                  sex + 
+                                  ethnic + 
+                                  ea + 
+                                  income + 
+                                  pop_density +
+                                  mdi_eng_q +
+                                  {apoll}')
+                model <- as.formula(model)
 
-            # Define Model
-            model <- str_glue('Surv(time_{outcome}, status_{outcome}) ~ 
-                              age + 
-                              sex + 
-                              ethnic + 
-                              ea + 
-                              income + 
-                              pop_density +
-                              tdi_q +
-                              {apoll}')
-            model <- as.formula(model)
+                # Fit and save model
+                fit <- coxph(model, data = df_sel_eng, method = 'efron')
+                name <- str_glue('model3_{outcome}_{ap_unit}_{ap_type}')
+                list_fit[[idx]] <- fit
+                names(list_fit)[idx] <- name
 
-            # Fit and save model
-            fit <- coxph(model, data = df_eng, method = 'efron')
-            name <- str_glue('model3_{outcome}_{ap_unit}_{ap_type}')
-            list_fit[[idx]] <- fit
-            names(list_fit)[idx] <- name
+                # AIC
+                list_aic[[idx]] <- AIC(fit)
+                names(list_aic)[idx] <- name
 
-            # AIC
-            list_aic[[idx]] <- AIC(fit)
-            names(list_aic)[idx] <- name
-
-            # Update global index
-            idx = idx + 1
+                # Update global index
+                idx = idx + 1
+            }
         }
     }
 }
 
-# (4) Area level covariates: multiple deprivation index quartiles (England)
-# restrict analysis to single ap quartiles
-for (outcome in c('dem')) {
-    for (ap_type in ap_all[c(-7, -8)]) {
-        for (ap_unit in c('q')) {
-            # set apoll for cox formula
-            apoll = str_glue('{ap_type}_{ap_unit}')
-
-            # Define Model
-            model <- str_glue('Surv(time_{outcome}, status_{outcome}) ~ 
-                              age + 
-                              sex + 
-                              ethnic + 
-                              ea + 
-                              income + 
-                              pop_density +
-                              mdi_eng_q +
-                              {apoll}')
-            model <- as.formula(model)
-
-            # Fit and save model
-            fit <- coxph(model, data = df_eng, method = 'efron')
-            name <- str_glue('model4_{outcome}_{ap_unit}_{ap_type}')
-            list_fit[[idx]] <- fit
-            names(list_fit)[idx] <- name
-
-            # AIC
-            list_aic[[idx]] <- AIC(fit)
-            names(list_aic)[idx] <- name
-
-            # Update global index
-            idx = idx + 1
-        }
-    }
-}
-
-# (5) Spatial confounding: recruitment centres (Mundlack regression)
+# (4) Spatial confounding: recruitment centres (Mundlack regression)
 # - ap mean within recruitment centre
 for (apoll in c('pm25_s', 'pmcoarse_s', 'pmabs_s', 'pm10_s', 'no2_s', 'nox_s', 'appc')) {
     df_sel <- df_sel %>%
@@ -266,10 +237,9 @@ for (apoll in c('pm25_s', 'pmcoarse_s', 'pmabs_s', 'pm10_s', 'no2_s', 'nox_s', '
 }
 
 # - Mundlack regression
-# exclude model with all ap
+# exclude model with all ap; run only for apoll coded as continuous
 for (outcome in c('dem', 'ad', 'vd')) {
     for (ap_type in ap_all[-7]) {
-        print(str_glue('{ap_type}'))
         if (ap_type %in% ap_list) { # for single pollutant models
             apoll = str_glue('{ap_type}_s')
         } else { # for appc
@@ -291,7 +261,7 @@ for (outcome in c('dem', 'ad', 'vd')) {
 
         # Fit and save model
         fit <- coxme(model, data = df_sel)
-        name <- str_glue('model5_{outcome}_s_{ap_type}')
+        name <- str_glue('model4_{outcome}_s_{ap_type}')
         list_fit[[idx]] <- fit
         names(list_fit)[idx] <- name
 
@@ -304,11 +274,11 @@ for (outcome in c('dem', 'ad', 'vd')) {
     }
 }
 
-# (6) Model (1) + age/sex time interactions
+# (5) Model (1) + age/sex/apoll time interactions
 # restrict to date_dem (all cause dementia) and appc
 # Split data for different time groups; choose cut based on Schoenfeld residual plots (df = 3) 
 df_split <- survSplit(Surv(time_dem, status_dem) ~ ., data = df_sel, cut = c(8, 12), episode = 'tgroup')
-list_tint <- c('age', 'sex') # variables interacting with time
+list_tint <- c('age', 'sex', 'appc') # variables interacting with time
 for (var_tint in list_tint) {
     # Model
     model <- str_glue('Surv(time_dem, status_dem) ~ 
@@ -324,7 +294,7 @@ for (var_tint in list_tint) {
 
     # Fit and save model
     fit <- coxph(model, data = df_split, method='efron')
-    name <- str_glue('model6_dem_s_appc_{var_tint}')
+    name <- str_glue('model5_dem_s_appc_{var_tint}')
     list_fit[[idx]] <- fit
     names(list_fit)[idx] <- name
 
@@ -336,7 +306,7 @@ for (var_tint in list_tint) {
     idx = idx + 1
 }
 
-# (7) Model (2) + apoll non-linear effect
+# (6) Model (2) + apoll non-linear effect
 # do not run for ap quartiles
 # for knots use .05 .275 .5 .725 .95 quantiles (Harrell, Springer 2001,
 for (outcome in c('dem', 'ad', 'vd')) {
@@ -353,7 +323,7 @@ for (outcome in c('dem', 'ad', 'vd')) {
 
     # Fit and save model
     fit <- coxph(model, data = df_sel, method='efron')
-    name <- str_glue('model7_{outcome}_s_appc')
+    name <- str_glue('model6_{outcome}_s_appc')
     list_fit[[idx]] <- fit
     names(list_fit)[idx] <- name
 
