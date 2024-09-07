@@ -14,71 +14,80 @@ install.packages('kableExtra')
 install.packages('coxme')
 install.packages('stargazer')
 
+install.packages('flextable') # needs apt install libfontconfig1-dev and libcairo2-dev
+install.packages('gdtools') # needs apt install libfontconfig1-dev and libcairo2-dev
+install.packages('interactionR') # needs apt install libfontconfig1-dev and libcairo2-dev
+library(interactionR) 
+
 library(data.table)
+library(plyr)
 library(tidyverse)
 library(here)
 library(finalfit)
+library(kableExtra)
 library(survival)
-library("survminer")
+library(survminer)
 library(coxme)
 library(stargazer)
+library(glmnet)
+library(xtable)
+library(rlang)
+library(vctrs)
 
 source(paste0(here(), '/src/forest_plot.R'))
 
 # Load Data -------------------------------------------------------------------
 data_path <- str_glue('{here()}/output/results/cox/savedata/')
+
 list_fit <- readRDS(file = paste0(data_path, 'fits.rds'))
 list_aic <- readRDS(file = paste0(data_path, 'aic.rds'))
-list_test <- readRDS(file = paste0(data_path, 'tests.rds'))
-list_spline <- readRDS(file = paste0(data_path, 'spline.rds'))
-
-list_fit %>% names
-list_fit[['model5_dem_s_appc_appc']] %>% summary
-list_fit[['model1_dem_s_appc']] %>% summary
-ggcoxzph(list_test[['model1_dem_s_pm10']])
-list_test[['model1_dem_s_pm25']]
-
-list_fit[['model5_dem_s_appc_appc']] %>% str
+list_tests <- readRDS(file = paste0(data_path, 'tests.rds'))
+list_vif <- readRDS(file = paste0(data_path, 'vif.rds'))
+list_cca <- readRDS(file = paste0(data_path, 'cca.rds'))
 
 # Discard empty elements in lists
 list_fit <- list_fit[list_fit %>% names %>% complete.cases]
 list_aic <- list_aic[list_aic %>% names %>% complete.cases]
-list_test <- list_test[list_test %>% names %>% complete.cases]
-list_spline <- list_spline[list_spline %>% names %>% complete.cases]
+list_tests <- list_tests[list_tests %>% names %>% complete.cases]
+list_vif <- list_vif[list_vif %>% names %>% complete.cases]
+list_cca <- list_cca[list_cca %>% names %>% complete.cases]
 
-# Drop models with all pollutants for forest plots
-list_forest <- list_fit[!grepl('all', names(list_fit))]
+# Drop models with all pollutants for forest plots and negative control later
+list_aggregate <- list_fit[!grepl('all', names(list_fit))]
 
 # Exclude drop_var from aggregate tables
-drop_var <- c('age', 'sex', 'ethnic', '\\bea\\b', 'income', 'pop_density', 'tdi', 'md') %>% 
+drop_var <- c('age', 'sex', 'ethnic', '\\bea\\b', 'income', 'pop_density', 'tdi', 'mdi') %>% 
     paste(collapse = '|')
 
 # Plot and save forest plots --------------------------------------------------
-# Aggregate air pollutant HR 
-list_aggregate <- as.list(rep(NA, 50))
+# Aggregate air pollutant HR  
+list_forest <- as.list(rep(NA, 100))
 idx = 1
 
 # Aggregate across pollutants
-# model 1: main
-# model 2: main_eng
-# model 3: + mdi_eng
-# model 4: Mundalak rec_centre
-for (model in as.character(1:4)) {
-    for (outcome in c('dem', 'ad', 'vd')) {
+# model 1:  basic
+# model 2:  (1) + mdi_eng
+# model 3:  (2) + address_buff = 5
+# model 9:  (1) but for copd positive control
+# model 10: (9) + mdi_eng
+# model 11: (10) + address_buff = 5
+# model 18: (3) + noise pollution
+for (model in as.character(c(1:3, 9:11, 18))) {
+    for (outcome in c('dem', 'ad', 'vd', 'copd')) {
         for (ap_unit in c('s', 'q')) {
-            idx_cat <- grep(str_glue('model{model}_{outcome}_{ap_unit}'), names(list_forest))
+            idx_cat <- grep(str_glue('model{model}_{outcome}_{ap_unit}'), names(list_aggregate))
             if (!is_empty(idx_cat)) {
                 # Get aggregated data
-                names_cat <- names(list_forest)[idx_cat]
-                list_tidy <- map(list_forest[names_cat], finalfit::fit2df, condense = F)
+                names_cat <- names(list_aggregate)[idx_cat]
+                list_tidy <- map(list_aggregate[names_cat], finalfit::fit2df, condense = F)
                 table_fits <- rbindlist(list_tidy)
                 var_mask <- map(table_fits$explanatory, ~ grepl(drop_var, .x)) %>% unlist
                 table_fits <- table_fits[!var_mask, ]
 
                 # Save in list
                 name <- str_glue('model{model}_{outcome}_{ap_unit}')
-                list_aggregate[[idx]] <- table_fits
-                names(list_aggregate)[idx] <- name
+                list_forest[[idx]] <- table_fits
+                names(list_forest)[idx] <- name
 
                 # Update global index
                 idx = idx + 1
@@ -89,9 +98,9 @@ for (model in as.character(1:4)) {
 }
 
 # Aggregate across air pollutant units (scaled by IQR and quartiles)
-# Only for model 1-3
+# - helper function
 combine_aptype <- function(x) {
-    idx_combine <- grep(x, names(list_aggregate))
+    idx_combine <- grep(x, names(list_forest))
     new_order <- order(c(2,3,4, # pm25_q
                          6,7,8, # pmcoarse_q
                          10, 11, 12, # pmabs_q
@@ -103,258 +112,444 @@ combine_aptype <- function(x) {
                          9, # pmabs_s
                          13, # pm10_s
                          17, # no2_s
-                         21, # nox_s
+                         21, # no_s
                          25)) # appc
-    table_ordered <- rbind(list_aggregate[[idx_combine[2]]], list_aggregate[[idx_combine[1]]])[new_order, ]
+    table_ordered <- rbind(list_forest[[idx_combine[2]]], list_forest[[idx_combine[1]]])[new_order, ]
     table_ordered
 }
 
-name_au <- map(c('1', '2', '3'), 
-               function(x) map(c('dem', 'ad', 'vd'), 
-                               function(y) str_glue('model{x}_{y}'))) %>% unlist
+# - new names
+name_au_dem <- map(as.character(c(1:3)), 
+    function(x) map(c('dem', 'ad', 'vd'), 
+        function(y) str_glue('model{x}_{y}'))) %>% unlist
 
-names(list_aggregate)[21 + 1:9] <- map(1:9, # model >17 save _s and _q combined
-                                       function(x) names(list_aggregate)[[21 + x]] <- name_au[x])
-list_aggregate[21 + 1:9] <- map(1:9, 
-                                function(x) list_aggregate[[21 + x]] <- combine_aptype(name_au[x]))
+name_au_copd <- map(as.character(c(9:11)), 
+    function(x) map(c('copd'), 
+        function(y) str_glue('model{x}_{y}'))) %>% unlist
 
-list_aggregate <- list_aggregate[ list_aggregate %>% names %>% complete.cases]
+name_au <- c(name_au_dem, name_au_copd)
 
-# Add 'all' models (with all single pollutants in one model) to list_aggregate
-list_fit_all <- list_fit[grepl('all', names(list_fit))]
+# - add combined models
+names(list_forest)[27 + 1:12] <- map(1:12, # model >17 save _s and _q combined
+                                       function(x) names(list_forest)[[27 + x]] <- name_au[x])
+list_forest[27 + 1:12] <- map(1:12, 
+                                function(x) list_forest[[27 + x]] <- combine_aptype(name_au[x]))
+
+list_forest <- list_forest[list_forest %>% names %>% complete.cases]
+
+# - add 'all' models (with all single pollutants in one model) to list_forest
+list_fit_all <- list_fit[grepl('all', names(list_fit)) & !grepl('fish', names(list_fit))]
 list_fit_all <- map(list_fit_all, finalfit::fit2df, condense = F)
 list_fit_all <- map(list_fit_all, ~ .x[!grepl(drop_var, .x$explanatory), ])
-list_aggregate <- c(list_aggregate, list_fit_all)
+list_forest <- c(list_forest, list_fit_all)
 
-# Plot forests
+# Saving directory
 save_forest <-  here(str_glue('output/results/cox/display/forests/'))
 if (!file.exists(save_forest)) {
     dir.create(save_forest, recursive = TRUE)
 }
 
-walk(19:length(list_aggregate), # model1-2 with _s and _q combined
-     function (x) plot_forest(list_aggregate[[x]],
-                              str_glue('{save_forest}{names(list_aggregate)[[x]]}')))
+# Generate and save forests
+walk(27:length(list_forest), # model1-2 with _s and _q combined
+     function (x) plot_forest(list_forest[[x]],
+        str_glue('{save_forest}{names(list_forest)[[x]]}')))
 
-# Generate and save Tables ----------------------------------------------------
-save_table <-  here(str_glue('output/results/cox/display/tables/'))
-if (!file.exists(save_table)) {
-    dir.create(save_table, recursive = TRUE)
+
+
+# Tables for cox models -------------------------------------------------------
+# Saving directory
+save_table_cox <-  here(str_glue('output/results/cox/display/tables_cox/'))
+if (!file.exists(save_table_cox)) {
+    dir.create(save_table_cox, recursive = TRUE)
 }
-name_tables <- list_fit %>% names
-walk(.x = name_tables, ~ finalfit::fit2df(list_fit[[.x]], condense = F) %>%
-         mutate(# Recode p-value
-                'p-value' = case_when(
-                                      p < 0.001 ~ '<0.001',
-                                      round(p, 2) == .05 ~ as.character(round(p, 3)),
-                                      p < .01 ~ str_pad(
-                                                        as.character(round(p, 3)),
-                                                        width = 4,
-                                                        pad = '0',
-                                                        side = 'right'
-                                                        ),
-                              T ~ str_pad(
-                                          as.character(round(p, 2)),
-                                          width = 4,
-                                          pad = '0',
-                                          side = 'right')
-                              ),
-                p = NULL
-                ) %>%
-         kable(format = 'latex',
-               digits = 2,
-               booktabs = T) %>%
-         kable_styling(latex_options = "striped") %>% 
-         kableExtra::save_kable(str_glue('{save_table}{.x}.tex')))
 
-#map(grep('model5', name_tables), ~ ranef(list_fit[[.x]])) %>% rbindlist
+# Generate tables for cox models (excluding time interaction models)
+list_tables <- c('model1_',  # main model
+                 'model2_',  # adjusted for mdi
+                 'model3_',  # +5
+                 'model9_',  # positive control
+                 'model10_', # adjusted for mdi
+                 'model11_', # +5
+                 'model18_', # noise pollution
+                 'model19_', # interaction analysis
+                 'model20_') %>% paste(collapse = '|') # +5
+list_tables <- grep(list_tables, list_fit %>% names, value = T)
 
-# Plot splines ----------------------------------------------------------------
-attributes(list_spline[[1]])
-df_spline <- list_spline[[1]]$appc
-center <- with(df_spline, y[x == min(x)])
-ytemp <- exp(df_spline[['y']] + outer(df_spline[['se']], c(0, -1, 1), '*'))
-#ytemp <- df_spline[['y']] + outer(df_spline[['se']], c(0, -1, 1), '*')
+walk(.x = list_tables, ~ finalfit::fit2df(list_fit[[.x]], condense = F) %>%
+    mutate(# Recode p-value
+        'p-value' = case_when(
+            p < 0.001 ~ '$<0.001$',
+            p >= 0.001 ~ str_pad(
+                as.character(round(p, 3)),
+                width = 4,
+                pad = '0',
+                side = 'right') %>% paste0('$', ., '$'),
+            TRUE ~ str_pad(
+                as.character(round(p, 2)),
+                width = 4,
+                pad = '0',
+                side = 'right') %>% paste0('$', ., '$')
+        ),
+        p = NULL,
+        'explanatory' = case_when(
+           grepl('age', explanatory) ~ c('age'),
+           grepl('sexmale', explanatory) ~ c('male'),
+           grepl('ethnicother', explanatory) ~ c('ethnic. other'), 
+           grepl('ea', explanatory) ~ c('education'), 
+           grepl('income18,000-30,999', explanatory) ~ c('inc. 18-31k'),
+           grepl('income31,000-51,999', explanatory) ~  c('inc. 31-52k'),
+           grepl('income52,000-100,000', explanatory) ~  c('inc. 52-100k'), 
+           grepl('income>100,000', explanatory) ~ c('inc. $>$ 100k'), 
+           grepl('pop_densityrural', explanatory) ~ c('rural area'), 
+           grepl('mdi_eng_q2nd:', explanatory) ~ c('mdi 2q int.'), # set before mdi/air pollutants
+           grepl('mdi_eng_q3rd:', explanatory) ~ c('mdi 3q int.'), # set before mdi/air pollutants
+           grepl('mdi_eng_q4th:', explanatory) ~ c('mdi 4q int.'), # set before mdi/air pollutants
+           grepl('mdi_eng_q2nd', explanatory) ~ c('mdi 2q'), 
+           grepl('mdi_eng_q3rd', explanatory) ~ c('mdi 3q'), 
+           grepl('mdi_eng_q4th', explanatory) ~ c('mdi 4q'), 
+           grepl('pm25_s', explanatory) ~ c('pm$_{25}$'), 
+           grepl('pm25_q2nd', explanatory) ~ c('pm$_{25}$ 2q'), 
+           grepl('pm25_q3rd', explanatory) ~ c('pm$_{25}$ 3q'),
+           grepl('pm25_q4th', explanatory) ~ c('pm$_{25}$ 4q'), 
+           grepl('pmcoarse_s', explanatory) ~ c('pm$_{coarse}$') , 
+           grepl('pmcoarse_q2nd', explanatory) ~ c('pm$_{coarse}$ 2q'), 
+           grepl('pmcoarse_q3rd', explanatory) ~ c('pm$_{coarse}$ 3q'), 
+           grepl('pmcoarse_q4th', explanatory) ~ c('pm$_{coarse}$ 4q'), 
+           grepl('pmabs_s', explanatory) ~ c('pm$_{abs}$'), 
+           grepl('pmabs_q2nd', explanatory) ~ c('pm$_{abs}$ 2q'), 
+           grepl('pmabs_q3rd', explanatory) ~ c('pm$_{abs}$ 3q'), 
+           grepl('pmabs_q4th', explanatory) ~ c('pm$_{abs}$ 4q'), 
+           grepl('pm10_s', explanatory) ~ c('pm$_{10}$'), 
+           grepl('pm10_q2nd', explanatory) ~ c('pm$_{10}$ 2q'), 
+           grepl('pm10_q3rd', explanatory) ~ c('pm$_{10}$ 3q'), 
+           grepl('pm10_q4th', explanatory) ~ c('pm$_{10}$ 4q'), 
+           grepl('no2_s', explanatory) ~ c('no$_{2}$'), 
+           grepl('no2_q2nd', explanatory) ~ c('no$_{2}$ 2q'), 
+           grepl('no2_q3rd', explanatory) ~ c('no$_{2}$ 3q'), 
+           grepl('no2_q4th', explanatory) ~ c('no$_{2}$ 4q'), 
+           grepl('no_s', explanatory) ~ c('no'), 
+           grepl('no_q2nd', explanatory) ~ c('no 2q'), 
+           grepl('no_q3rd', explanatory) ~ c('no 3q'), 
+           grepl('no_q4th', explanatory) ~ c('no 4q'), 
+           grepl('appc', explanatory) ~ c('pollution score'), 
+           grepl('appc_all', explanatory) ~ c('pollution score (all)'), 
+           grepl('noise_poll_s', explanatory) ~ c('noise pollution')
+           # TRUE ~ paste0('$', explanatory, '$')
+        ) 
+    ) %>%
+    kable(format = 'latex',
+        digits = 2,
+        escape = F,
+        booktabs = T) %>%
+    kable_styling(latex_options = "striped") %>% 
+    kableExtra::save_kable(str_glue('{save_table_cox}{.x}.tex')))
 
-matplot(df_spline[['x']], (ytemp), type = 'l', lty = c(1, 2, 2), col = 1)
-#matplot(df_spline[['x']], (ytemp), log = 'y', type = 'l', lty = c(1, 2, 2), col = 1)
 
+# Tables for Lasso models -----------------------------------------------------
+# Saving directory
+save_table_lasso <-  here(str_glue('output/results/cox/display/tables_lasso/'))
+if (!file.exists(save_table_lasso)) {
+    dir.create(save_table_lasso, recursive = TRUE)
+}
+# 2: Generate tables for lasso cox models
+mask_lasso <- grep('lasso', list_fit %>% names, value = T) %>%
+    grep('dem', ., value = T)
+list_lasso <- list_fit[mask_lasso]
 
-# Plot Shoefield residuals ----------------------------------------------------
-
-
-#######################################################################
-
-lss %>% length
-lss[1]
-name_tables[1] 
-# Create 
-# Loop through:
-for (model in as.character(1:(n_model + n_model_ml))) {
-    if (idx < n_model * 2 * 6 + 1) { # unilevel models
-        for (ap_unit in c('s', 'q')) {
-            for (apoll in c('pm_25', 'pm_coarse', 'pm_abs', 'pm_10', 'no_2', 'no_x')) {
-                coxfit <- str_glue('fit{model}_{ap_unit}_{apoll}')
-                # Results cox fit
-                file_name <- str_glue('{save_path}tbl_{coxfit}.tex')
-                list_forest[[coxfit]] %>% 
-                    finalfit::fit2df() %>%
-                    knitr::kable(format = 'latex') %>% 
-                    kableExtra::save_kable(file_name)
-                # Proportionality check
-                file_name <- str_glue('{save_path}ptest_{coxfit}.tex')
-                list_test[[coxfit]]$table %>% 
-                    knitr::kable(format = 'latex') %>% 
-                    kableExtra::save_kable(file_name)
-                # Update index
-                idx <- idx + 1
-            }
-        }
-    } else { # multilevel models
-        for (apoll in c('pm_25', 'pm_coarse', 'pm_abs', 'pm_10', 'no_2', 'no_x')) {
-            coxfit <- str_glue('fit{model}_{apoll}')
-            # Results cox fit
-            file_name <- str_glue('{save_path}tbl_{coxfit}.tex')
-            list_forest[[coxfit]] %>% 
-                finalfit::fit2df() %>%
-                knitr::kable(format = 'latex') %>% 
-                kableExtra::save_kable(file_name)
-            # Proportionality check
-            file_name <- str_glue('{save_path}ptest_{coxfit}.tex')
-            list_test[[coxfit]]$table %>% 
-                knitr::kable(format = 'latex') %>% 
-                kableExtra::save_kable(file_name)
-        }
+df_lasso <- lmap(list_lasso, \(x) {
+         model_ = x[[1]]
+         lambda_min = model_[['lambda.min']]
+         if (grepl('16', x %>% names)) {
+             col_name = '$\\geq1$ year' 
+         } else {
+             col_name = '$\\geq5$ year'
+         }
+         df_ = model_ %>% coef(s = lambda_min) %>% exp %>% .[, 1] %>% as.data.frame
+         df_ = df_ %>% rename(., !!col_name:= .)
+         # df_[['index']] = df_ %>% rownames
+         return(df_)
     }
+)
+df_lasso <- df_lasso  %>% bind_cols() 
+df_lasso <- df_lasso %>% slice(8:n())
+rownames(df_lasso) <- c('pm$_{25}$', 'pm$_{coarse}$', 'pm$_{abs}$', 'pm$_{10}$', 'no$_{2}$', 'no') %>%
+    as.expression
+
+# Save as tables.tex
+df_lasso %>%
+    kable(format = 'latex', digits = 4, escape = F, booktabs = T) %>%
+    kable_styling(latex_options = "striped") %>% 
+    kableExtra::save_kable(str_glue('{save_table_lasso}lasso.tex'))
+
+
+# Plots/tables for Random effect models -----------------------------------------------------
+# Saving directory
+save_re <-  here(str_glue('output/results/cox/display/rec_centres/'))
+if (!file.exists(save_re)) {
+    dir.create(save_re, recursive = TRUE)
 }
 
-# Function for plotting and saving Shoenfield residual
-plot_res <- function(x, res = TRUE) {
-    data_res <- list_test[[x]]
+# Generate tables for random effects
+mask_re <- grepl(c('model4|model5'), list_fit %>% names)
+list_re <- list_fit[mask_re]
+
+df_rc_slope <- map(c('model4', 'model5'), function(x) {
+                    mask_re <- grepl(x, list_fit %>% names)
+                    list_re <- list_fit[mask_re] %>% map(ranef)
+                    list_slope = list_re %>%
+                        map(function(y) {y$rec_centre[, 2] %>% data.frame}) %>%
+                        bind_cols
+                    names(list_slope) = c('pm_25', 'pm$_coarse$', 'pm$_abs', 'pm_$10$', 'no$_2$', 'no', 'pollution score')
+                    if (grepl('4', list_re %>% names) %>% any) {
+                        list_slope['model'] = '>=1 year'
+                    } else {
+                        list_slope['model'] = '>=5 year'
+                    }
+                    list_slope
+})
+
+# Prepare df for plotting
+new_names <- expression(pm[25], pm[coarse], pm[abs], pm[10], no[2], no, atop(pollution,score))
+fig <- df_rc_slope %>% 
+    bind_rows %>% 
+    data.table %>% 
+    melt(measure.vars = names(.) %>% head(-1)) %>%
+    ggplot(aes(x = variable,
+               y = exp(value),
+               color = model,
+               shape = model)) +
+    geom_boxplot() +
+    scale_x_discrete(name = 'Pollutants',
+                     labels = new_names) +
+    scale_y_continuous(name = 'Hazard Ratio') +
+                     # expand = expansion(mul=0.01)) +
+    geom_point(position = position_jitterdodge(), size = 1.5) +
+    geom_hline(yintercept = 1, linetype="dotted", linewidth = 0.5) +
+    coord_flip() +
+    theme_gray(base_size = 15)
+
+# Save plot
+fig %>% ggsave(file = paste0(save_re, 'boxplot_rc.eps'))
+
+# Generate tables
+df_rc_std <-  map(c('model4', 'model5'), function(x) {
+                   mask_re <- grepl(x, list_fit %>% names)
+                   list_re <- list_fit[mask_re] %>% 
+                       map(\(x) { x$vcoef %>% .[[1]] %>% .[2, 2] %>% sqrt}) %>% 
+                       unlist %>% 
+                       data.frame %>%
+                       rename(., 'sd' = .) %>%
+                       mutate(
+                              'HR scale' = exp(sd)
+                       )
+                     }) %>% bind_rows
+
+# Rename indexes
+rc_names <- map(c('$\\geq1$ year', '$\\geq5$ years'), \(x) {
+                    map(c('pm$_{25}$', 'pm$_{coarse}$', 'pm$_{abs}$', 'pm$_{10}$', 'no$_{2}$', 'no', 'pollution score'), \(y) {
+                            str_glue('{y} {x}')
+                       }) %>% unlist
+                     }
+) %>% unlist
+rownames(df_rc_std) <- rc_names
+
+# Save as tables.tex
+df_rc_std %>%
+    kable(format = 'latex', digits = 4, escape = F, booktabs = T) %>%
+    kable_styling(latex_options = "striped") %>% 
+    kableExtra::save_kable(str_glue('{save_re}tc_table.tex'))
+
+
+
+# Proportional Hazards check results ------------------------------------------------
+# - saving directory
+save_pha <-  here(str_glue('output/results/cox/display/ph_assumption/'))
+if (!file.exists(save_pha)) {
+    dir.create(save_pha, recursive = TRUE)
+}
+
+# - helper function for Schoenfeld redisuals
+plot_schoef <- function(x, res = T, df = 2) {
+    data_schoef <- list_tests[[x]]
     # Initialise subplots
-    n_subplots <- data_res$table %>% dim %>% .[1] - 1
+    schoef_p <- data_schoef$table[, 'p'] %>% round(3)
+    n_subplots <- schoef_p %>% length(.) - 1
     n_row <- n_subplots %>% sqrt %>% ceiling
-    par(mfrow = c(n_subplots = c(n_row, n_row))) # set grid subplots
+    par(mfrow = c(n_row, n_row)) # set grid subplots
     # Plot
     for (ax in 1:n_subplots) {
-        plot(data_res[ax], col = 'red', df = 3, resid = res); plot1 <- recordPlot()
+        plot(data_schoef[ax], 
+            col = 'red', 
+            df = df, 
+            resid = res, 
+            main = str_glue('p = {schoef_p[ax]}')); plot1 <- recordPlot()
     }
     # Save plot
+    if (res) {
+        name_schoef = paste0(x, '_res') 
+    } else {
+        name_schoef = paste0(x, '_nores', '_', df)
+    }
     setEPS()
-    postscript(paste0(save_path, x, '.eps'))
+    postscript(paste0(save_pha, name_schoef, '.eps'))
     print(plot1) # save prints environment; without print(plot) env is empty
     dev.off()
 }
 
-# Schoenfield residual plots for selected models
+# Schoenfeld residual plots for selected models
 # Time axis is survival_function(t) using Keplan-Meier method, and transforms
 # equally spaced time points in equally spaced survival probabilities, thus 
 # evenly distributing events across x axis.
-plot_res('fit1_q_pm_25', res = F)
-plot_res('fit1_s_pm_25')
-plot_res('fit2_s_pm_25')
-plot_res('fit3_s_pm_25')
-plot_res('fit4_s_pm_25')
-plot_res('fit5_s_pm_25')
-plot_res('fit6_s_pm_25')
-
-# Merge apoll results in one df - keep only apoll coef
-filter_fit <- funciont(x, idx) {
-    list_x_f = as.list(rep(NA, 6))
-    idx_ap = 1
-    for (apoll in c('pm_25', 'pm_coarse', 'pm_abs', 'pm_10', 'no_2', 'no_x')) {
-             list_x_f[[idx_ap]] <- list_fit[[str_glue('x_{apoll}')]] %>%
-                 finalfit::fit2df() %>%
-                 .[mask[idx], ]
-             names(list_x_f)[idx_ap] = apoll
-             idx_ap = idx_ap + 1
-    }
-    list_x_f
+for (apoll in c('pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'no', 'all')) {
+    plot_schoef(str_glue('model1_dem_s_{apoll}'), res = T)
+    plot_schoef(str_glue('model1_dem_s_{apoll}'), res = F, df = 2)
+    plot_schoef(str_glue('model1_dem_s_{apoll}'), res = F, df = 3)
 }
-2*(list_fit[['fit1_s_pm_25']]$loglik - list_fit[['fit1_q_pm_25']]$loglik)[2]
-                         
-    x_m <- list_fit[[x]]
-for (model in as.character(1:(n_model + n_model_ml))) {
-    if (idx < n_model * 2 + 1) { # unilevel models
-        for (ap_unit in c('s', 'q')) {
-            coxfit <- str_glue('fit{model}_{ap_unit}')
-            # Merge
-            df_pm_25 <- > list_fit[[str_glue('{coxfit}_pm_25')]] %>% 
-                finalfit::fit2df()
-            assign(df_name,
-                   rbind(list_fit[[str_glue('{coxfit}_pm_25')]][mask, ],
-                         get(str_glue('{coxfit}_pm_coarse'))[mask, ],
-                         get(str_glue('{coxfit}_pm_abs'))[mask, ],
-                         get(str_glue('{coxfit}_pm_10'))[mask, ],
-                         get(str_glue('{coxfit}_no_2'))[mask, ],
-                         get(str_glue('{coxfit}_no_x'))[mask, ]
-                   )
-            )
-            # Results cox fit
-            file_name <- str_glue('{save_path}tbl_{coxfit}.tex')
-            list_fit[[coxfit]] %>% 
-                finalfit::fit2df() %>%
-                knitr::kable(format = 'latex') %>% 
-                kableExtra::save_kable(file_name)
-            # Update index
-            idx <- idx + 1
+
+# Generate and save table for models with time interaction
+names_tint <- paste(c('\\bmodel1_dem_s_appc\\b', 'model8_dem_s_appc_age', 'model8_dem_s_appc_sex','model8_dem_s_appc_income'), collapse = '|') 
+list_tint <- list_fit[grep(names_tint, list_fit %>% names, value = T)]
+df_tint <- lmap(list_tint, \(x) {
+                    model_name = x %>% names
+                    df_ <- x[[1]] %>% 
+                        finalfit::fit2df(condense = F) %>% .[.$explanatory == 'appc', ]
+                    df_ = df_ %>%
+                        mutate(
+                               explanatory = NULL,
+                               model = model_name)
+                    df_ = df_[, c('model', 'HR', 'L95', 'U95', 'p')]
+            }
+) %>% rbindlist
+
+df_tint <- df_tint %>% 
+    mutate(model = case_when(
+                             grepl('model1', model) ~ 'pollution score',
+                             grepl('_age', model) ~ 'pollscore-age',
+                             grepl('_sex', model) ~ 'pollution score-sex', 
+                             grepl('_income', model) ~ 'pollution score-income'),
+           'p-value' = case_when(
+                         p < 0.01 ~ '$<$0.001',
+                         TRUE ~ str_pad(
+                                        as.character(round(p, 2)),
+                                        width = 4,
+                                        pad = '0',
+                                        side = 'right')
+                         ),
+           p = NULL
+    )
+df_tint %>% 
+    kable(format = 'latex', digits = 4, escape = F, booktabs = T) %>%
+    kable_styling(latex_options = "striped") %>% 
+    kableExtra::save_kable(paste0(save_pha, 'table_appc_tint.tex'))
+
+
+# Save tables for negative control analyses -----------------------------------
+# - saving directory
+save_negative <-  here(str_glue('output/results/cox/display/negative_control/'))
+if (!file.exists(save_negative)) {
+    dir.create(save_negative, recursive = TRUE)
+}
+
+# - aggregate across pollutants for models:
+# model 11: Negative control with alcohol consumption frequency (without mdi_eng)
+# model 12: (11) + mdi_eng
+# model 13: (12) + address_buff = 5
+list_apoll <- paste(c('pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'no'), collapse = '|')  
+list_negative <- as.list(rep(NA, 20))
+idx <- 1
+#for (model in as.character(c(12:15))) {
+for (model in as.character(c(12:13))) {
+    idx_cat <- grep(str_glue('model{model}_fish_s'), names(list_aggregate))
+    if (!is_empty(idx_cat)) {
+        # Get aggregated data
+        names_cat <- names(list_aggregate)[idx_cat]
+        list_tidy <- map(list_aggregate[names_cat], \(x) confint.default(x) %>% exp %>% as.data.frame)
+        list_tidy <- list_tidy %>% reduce(rbind) %>% round(digits = 2)
+        colnames(list_tidy) <- c('L95', 'U95')
+        var_mask <-  list_tidy %>% rownames %>% grep(list_apoll, .)
+        table_fits <- list_tidy[var_mask,]
+
+        # Save in list
+        name <- str_glue('model{model}_fish_s')
+        list_negative[[idx]] <- table_fits
+        names(list_negative)[idx] <- name
+
+        # Update global index
+        idx = idx + 1
+    }
+}
+
+list_negative <- list_negative[list_negative %>% names %>% complete.cases]
+
+# Combine in dataframe
+df_negative <- lmap(list_negative, function(x) {
+                        model_ = x[[1]]
+                        if (grepl('12', x %>% names)) {
+                            model_name = 'mdi unudjusted' 
+                        } else {
+                            model_name = 'mdi udjusted'
+                        }
+                        poll_names = model_ %>% 
+                            rownames %>% 
+                            map(., function(x) {
+                                    paste0(x, '-', substr(model_name, 
+                                                          start = 5, 
+                                                          stop = 100L)) }) %>% 
+                            unlist
+                        model_ = model_ %>%
+                            mutate(model = model_name,
+                                   pollutant = poll_names)
+                        model_ = model_ %>% .[, c('model', 'pollutant', 'L95', 'U95')]
+    }
+) %>% bind_rows
+
+# Prepare df indexes and columns
+rownames(df_negative) <- df_negative[, 'pollutant']
+df_negative <- df_negative  %>% mutate(pollutant = NULL)
+new_idx <- vec_rep_each(1:6, 2)
+new_idx[seq(2, 12, 2)] <- new_idx[seq(2, 12, 2)] + 6
+df_negative <- df_negative[new_idx, ]
+
+df_negative %>% 
+    kable(format = 'latex', digits = 4, escape = F, booktabs = T) %>%
+    kable_styling(latex_options = "striped") %>% 
+    kableExtra::save_kable(paste0(save_negative, 'table_results.tex'))
+
+
+# Analyse and save interaction model results ----------------------------------
+# - saving directory
+save_int <-  here(str_glue('output/results/cox/display/interaction/'))
+if (!file.exists(save_int)) {
+    dir.create(save_int, recursive = TRUE)
+}
+
+# Create list of df with interactions
+list_interaction <- list_fit[grep(paste(c('model19', 'model20'), collapse = '|'), list_fit %>% names)]
+interactions_ <- map(list_interaction, function(x) { 
+                         coef_fit = x %>% coef
+                         ap_exposure = coef_fit %>% names %>% .[length(coef_fit) - 3]
+                         int_ = interactionR(x, exposure_names = c(ap_exposure, 'mdi_eng_q4th'))
+                         int_ = int_$dframe[c(1, 2, 3, 4, 7, 8),]
+                         return(int_)
+            }
+)
+
+# Create names for saving
+model_names <- map(list_interaction %>% names, function(x) {
+        apoll_ = substr(x, start = 14, stop = 100L)
+        if (grepl('19', x)) {
+            model_names_ = paste0('1year', apoll_)
+        } else {
+            model_names_ = paste0('5year', apoll_)
         }
-    } else { # multilevel models
-        coxfit <- str_glue('fit{model}_{apoll}')
-        # Results cox fit
-        file_name <- str_glue('{save_path}tbl_{coxfit}.tex')
-        list_fit[[coxfit]] %>% 
-            finalfit::fit2df() %>%
-            knitr::kable(format = 'latex') %>% 
-            kableExtra::save_kable(file_name)
-    }
-}
+        return(model_names_)}
+)
 
-for (model in as.character(1:n_model)) {
-    for (apoll_unit in c('s', 'q')) {
-        # Mask to keep only apoll coefficients
-        if (model == '1') {
-            mask = c(-1:-2)
-        } else if (model == '2') {
-            mask = c(-1:-9)
-        } else if (model == '3') {
-            mask = c(-1:-12)
-        }
-        # Merge
-        df_name = str_glue('df{model}_{apoll_unit}')
-        assign(df_name,
-               rbind(get(str_glue('{df_name}_pm_25'))[mask, ],
-                     get(str_glue('{df_name}_pm_coarse'))[mask, ],
-                     get(str_glue('{df_name}_pm_abs'))[mask, ],
-                     get(str_glue('{df_name}_pm_10'))[mask, ],
-                     get(str_glue('{df_name}_no_2'))[mask, ],
-                     get(str_glue('{df_name}_no_x'))[mask, ]
-                     )
-               )
-    }
-}
+# Save as individual tables
+walk(seq(1, length(interactions_)), function(x) {
+         interactions_[[x]] %>% 
+             kable(format = 'latex', digits = 3, escape = F, booktabs = T) %>%
+             kable_styling(latex_options = "striped") %>% 
+             kableExtra::save_kable(str_glue('{save_int}{model_names[[x]]}.tex'))
+})
 
-# Save merged df as tables
-for (model in c('1', '2', '3')) {
-    get(str_glue('df{model}_s')) %>% 
-        knitr::kable(format = 'latex') %>% 
-        kableExtra::save_kable(str_glue('{save_path}tbl_fit{model}_s.tex'))
-    get(str_glue('df{model}_q')) %>% 
-        knitr::kable(format = 'latex') %>% 
-        kableExtra::save_kable(str_glue('{save_path}tbl_fit{model}_q.tex'))
-}
-
-# Model 1 - covariate age, sex
-#dependent <- 'Surv(time, status)'
-#explanatory1 <- c('age', 'sex')
-#formula1 <- 'Surv(time, status) ~ age + sex'
-#for (apoll in c('pm_25', 'pm_coarse', 'pm_abs', 'pm_10', 'no_2', 'no_x')) {
-#    # fit with apoll as quartiles
-#    fit <- df %>%
-#        finalfit(dependent, append(explanatory1, paste0(apoll, '_q')))
-#    assign(paste0('fit1_q_', apoll), fit)
-#    # fit with apoll scaled by IQR
-#    fit <- df %>% 
-#        finalfit(dependent, append(explanatory1, paste0(apoll, '_s')))
-#    assign(paste0('fit1_s_', apoll), fit)
-#}

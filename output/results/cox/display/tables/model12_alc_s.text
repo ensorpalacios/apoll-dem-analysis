@@ -1,0 +1,17 @@
+% latex table generated in R 4.3.3 by xtable 1.8-4 package
+% Wed Aug  7 12:58:07 2024
+\begin{table}[ht]
+\centering
+\begin{tabular}{rrr}
+  \hline
+ & L95 & U95 \\ 
+  \hline
+pm25\_s & 1.01 & 1.03 \\ 
+  pmcoarse\_s & 0.99 & 1.00 \\ 
+  pmabs\_s & 1.03 & 1.04 \\ 
+  pm10\_s & 0.98 & 1.00 \\ 
+  no2\_s & 1.03 & 1.05 \\ 
+  no\_s & 1.00 & 1.02 \\ 
+   \hline
+\end{tabular}
+\end{table}

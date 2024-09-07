@@ -1,6 +1,8 @@
 #' Preprocess data
 #'
-#' Load, clean and recode data. 
+#' Load, clean and recode data.
+#' categorical covariates coded as nominal except alcohol consumption frequency
+#' (used as outcome in negative control analysis)
 #'
 #' @author Ensor Palacios, email{ensorrafael.palacios@bristol.ac.uk}
 #' @date 2024-05-30
@@ -37,7 +39,8 @@ var_list = c('eid',  '24006-0.0', '24007-0.0', '24008-0.0', '24005-0.0', '24003-
              '130892-0.0', '130894-0.0',
              '131258-0.0',
              '20023-0.0', '20018-0.0', '399-0.1', '399-0.2', '399-0.3', '20016-0.0',
-             '40000-0.0', '191-0.0', '190-0.0' 
+             '40000-0.0', '191-0.0', '190-0.0',
+             '1349-0.0', '1329-0.0'
 )
 var_names = c('eid', 'pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'nox', 'date_dem', 'src_dem', 'date_ad', 'src_ad', 'date_vd', 'src_vd',
               'age', 'sex',
@@ -57,7 +60,8 @@ var_names = c('eid', 'pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'nox', 'date_de
               'date_bipolar', 'date_depress',
               'date_hearloss',
               'reaction_time', 'prosp_memory', 'pairs_match1', 'pairs_match2', 'pairs_match3', 'fluid_intelligence',
-              'date_death', 'date_lost_fu', 'reason_lost_fu' 
+              'date_death', 'date_lost_fu', 'reason_lost_fu',
+              'processed_meat', 'fish'
 )
 
 name_keys <- data.frame('ukbb' = var_list, 'mine' = var_names)
@@ -80,15 +84,14 @@ clean_dates <- function(x) {
 
 # Factorise x into quartiles
 factorise <- function(x) {
-    x_q <- factor(as.integer(cut(x,
-                                 quantile(x,
-                                          probs = 0:4/4, 
-                                          na.rm = T
-                                          ), 
-                                 include.lowest = T
-                                 )),
-                  levels = c(1, 2, 3, 4),
-                  labels = c('1st', '2nd', '3rd', '4th'))
+    x_q <- cut(x,
+               quantile(x,
+                        probs = 0:4/4, 
+                        na.rm = T
+                        ), 
+               include.lowest = T,
+               labels = c('1st', '2nd', '3rd', '4th'),
+               ordered_result = F)
     x_q
 }
 
@@ -99,21 +102,34 @@ rescale <- function(x) {
 }
 
 # Clean/recode data -----------------------------------------------------------
+# Extract nitric oxide (no) values - no_x - no_2 (Cyrys et al., 2012)
+df <- df %>% mutate(no = nox - no2)
+
 # Transform air pollution into quartiles/rescale by IQR
-for (apoll in c('pm25', 'pmcoarse', 'pmabs', 'pm10', 'no2', 'nox')) {
+ap_list_all <- c('pm25', 'pmcoarse', 'pmabs', 'pm10', 'no2', 'no')
+for (apoll in ap_list_all) {
          df[, paste0(apoll, '_q')] <- factorise(df[, apoll])
          df[, paste0(apoll, '_s')] <- rescale(df[, apoll])
 }
 
-# PCA on apoll_s; retain pc1 only; exclude pmcoarse and pm10 based on results 
-# from single pollutant models: don't show any association with dementia
-appc_list <- c('pm25_s', 'pmabs_s', 'no2_s', 'nox_s')
-pc_apoll <- df %>%
-    select(all_of(appc_list )) %>%
+# PCA on apoll_s; retain pc1 only; one with all apoll inlcuded, one with
+# pmcoarse and pm10 excluded post-hoc based on results from single pollutant
+# models (don't show any association with dementia)
+pc_apoll_all <- df %>% # pca with all ap
+    select(all_of(ap_list_all)) %>%
     drop_na %>%
     prcomp(center = T, scale. = T)
-df['appc'] <- df %>%
-    select(all_of(appc_list )) %>%
+df['appc_all'] <- df %>% 
+    select(all_of(ap_list_all)) %>%
+    as.matrix(.) %*% pc_apoll_all[['rotation']][, 'PC1'] %>% .[, 1] * -1
+
+ap_list <- c('pm25_s', 'pmabs_s', 'no2_s', 'no_s')
+pc_apoll <- df %>% # pca with selected ap
+    select(all_of(ap_list)) %>%
+    drop_na %>%
+    prcomp(center = T, scale. = T)
+df['appc'] <- df %>% 
+    select(all_of(ap_list)) %>%
     as.matrix(.) %*% pc_apoll[['rotation']][, 'PC1'] %>% .[, 1] * -1
 
 # Clean time of dementia
@@ -140,7 +156,6 @@ df[, 'tdi_q'] <- factorise(df[, 'tdi'])
 
 # Take log mdi (deprivation index) and combine across Englang, Whales and Scotland
 df[, 'mdi_eng_q'] <- factorise(df[, 'mdi_eng'])
-# df[, 'mdi_eng'] <- df[, 'mdi_eng'] %>% log
 
 # Strata for sex (adult < 60; old >= 60)
 df[, 'age_strata'] <- ifelse(df[, 'age'] >= 60, '+60', '<60') %>% factor
@@ -154,7 +169,7 @@ df[, 'ethnic'] <- factor(df[, 'ethnic'],
                                     2, 1002, 2002, 3002, 4002,
                                     3, 1003, 2003, 3003, 4003,
                                     4, 2004, 3004, 5, 6,
-                                    -1 # do not know
+                                    -1 # do not know (assume they are 'other')
                                     ),
                   labels = c('white', 'white', 'other', 'other', 'other',
                              'other', 'white', 'other', 'other', 'other',
@@ -162,7 +177,7 @@ df[, 'ethnic'] <- factor(df[, 'ethnic'],
                              'other', 'other', 'other', 'other', 'other',
                              'other'
                              ),
-                  exclude = -3
+                  exclude = -3 # prefer not to answer
 )
 
 # Transform prs_ad into quartiles
@@ -212,17 +227,19 @@ df[, 'income'] <- factor(df[, 'income'],
                                     3,
                                     4,
                                     5
-                         ),
-                         labels = c('<18,000',
-                                    '18,000-30,999',
-                                    '31,000-51,999',
-                                    '52,000-100,000',
-                                    '>100,000'
-                         ),
-                         exclude = c(-1, -3) # do not know, prefer not to answer
+                                    ),
+                  labels = c('<18,000',
+                             '18,000-30,999',
+                             '31,000-51,999',
+                             '52,000-100,000',
+                             '>100,000'
+                             ),
+                  exclude = c(-1, -3), # do not know, prefer not to answer
+                  ordered = F
 )
 
-# Recode population density into urban and rural areas
+# Recode population density into urban and rural areas; followed
+# ukbb definitions
 df[, 'pop_density'] <- factor(df[, 'pop_density'],
                               levels = c(1, 2, 3, 4, 5, 6,
                                          7, 8, 11, 12, 13,
@@ -253,6 +270,9 @@ df[, 'rec_centre'] <- factor(df[, 'rec_centre'],
                   )
 )
 
+# Scale noise pollution by interquartile range
+df[, paste0('noise_poll', '_s')] <- rescale(df[, 'noise_poll'])
+
 # Categorise alcohol consumption as low,  medium, high; from Wang eClM 2024
 df[, 'alcohol'] <- factor(df[, 'alcohol'],
                           levels = c(5, 6,  # special occasions, never
@@ -263,7 +283,8 @@ df[, 'alcohol'] <- factor(df[, 'alcohol'],
                              'medium', 'medium',
                              'high', 'high'
                              ),
-                  exclude = -3               # prefer not to answer
+                  exclude = -3,             # prefer not to answer
+                  ordered = T
 )
 
 # Take average time out
@@ -290,9 +311,59 @@ as_max <- df['activity_score'] %>% max(na.rm = T)
 df <- df %>% mutate(activity_score = cut(activity_score, 
                                          breaks = c(0, 600, 3000, as_max), 
                                          include.lowest = T, 
-                                         labels = c('low', 'moderate', 'intense')
+                                         labels = c('low', 'moderate', 'intense'),
+                                         ordered_result = F
     )
 )
+
+
+# Encode processed meat intake as ordinal variable
+df[, 'processed_meat'] <- factor(df[, 'processed_meat'],
+                                 levels = c(0, # never
+                                            1, # less than once a week
+                                            2, # once a week
+                                            3, # 2-4 times a week
+                                            4, # 5-6 times a week
+                                            5  # one or more times daily
+                                            ),
+                  labels = c('never',
+                             '<1week',
+                             '1week',
+                             '2-4week',
+                             '>5week',
+                             '>5week'
+#                             '2-4week',
+#                             '5-6week',
+#                             '>=1day'
+                             ),
+                  exclude = c(-1, -3), # do not know, prefer not to answer
+                  ordered = T
+)
+
+# Encode oily fish intake as ordinal variable; order from more often to less
+# often intake, to match (assumed) effect of multiple deprivation index on incidence
+# of dementia.
+df[, 'fish'] <- factor(df[, 'fish'],
+                                 levels = c(0, # never
+                                            1, # less than once a week
+                                            2, # once a week
+                                            3, # 2-4 times a week
+                                            4, # 5-6 times a week
+                                            5  # one or more times daily
+                                            ),
+                  labels = c('never',
+                             '<1week',
+                             '1week',
+                             '>2week',
+                             '>2week',
+                             '>2week'
+#                             '2-4week',
+#                             '5-6week',
+#                             '>=1day'
+                             ),
+                  exclude = c(-1, -3), # do not know, prefer not to answer
+                  ordered = T
+) %>% fct_rev
 
 # Clean sleep duration variable
 df[, 'sleep_time'] <- case_match(df[, 'sleep_time'],
@@ -330,7 +401,8 @@ df[, 'date_atherosc'] <- clean_dates(df[, 'date_atherosc'])
 df[, 'chol'] <- df[, 'chol'] >= 6.5
 df[, 'chol'] <- factor(df[, 'chol'],
                        levels = c(F, T),
-                       labels = c('non-high', 'high')
+                       labels = c('non-high', 'high'),
+                       ordered = F
 )
 
 # Clean date stroke
