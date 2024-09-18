@@ -110,7 +110,7 @@ for (outcome in c('dem', 'ad', 'vd')) {
                 apoll <- ap_type
             }
 
-            if (!(ap_type == 'appc' & ap_unit == 'q')) { # do not run for appc-q (not existing)
+            if (!(grepl('appc', ap_type) & ap_unit == 'q')) { # do not run for appc-q (not existing)
                 # Define Model
                 model <- str_glue('Surv(time_{outcome}, status_{outcome}) ~ 
                                   age + 

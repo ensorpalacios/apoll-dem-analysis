@@ -55,11 +55,12 @@ list_cca <- list_cca[list_cca %>% names %>% complete.cases]
 # Drop models with all pollutants for forest plots and negative control later
 list_aggregate <- list_fit[!grepl('all', names(list_fit))]
 
-# Exclude drop_var from aggregate tables
-drop_var <- c('age', 'sex', 'ethnic', '\\bea\\b', 'income', 'pop_density', 'tdi', 'mdi') %>% 
-    paste(collapse = '|')
 
 # Plot and save forest plots --------------------------------------------------
+# Exclude drop_var from aggregate tables
+drop_var <- c('age', 'sex', 'ethnic', '\\bea\\b', 'income', 'pop_density', 'tdi', 'mdi', 'noise_poll_s') %>% 
+    paste(collapse = '|')
+
 # Aggregate air pollutant HR  
 list_forest <- as.list(rep(NA, 100))
 idx = 1
@@ -118,21 +119,21 @@ combine_aptype <- function(x) {
     table_ordered
 }
 
-# - new names
+# - new names (all units)
 name_au_dem <- map(as.character(c(1:3)), 
     function(x) map(c('dem', 'ad', 'vd'), 
         function(y) str_glue('model{x}_{y}'))) %>% unlist
-
 name_au_copd <- map(as.character(c(9:11)), 
     function(x) map(c('copd'), 
         function(y) str_glue('model{x}_{y}'))) %>% unlist
+name_au_noise <- 'model18_dem'
 
-name_au <- c(name_au_dem, name_au_copd)
+name_au <- c(name_au_dem, name_au_copd, name_au_noise)
 
 # - add combined models
-names(list_forest)[27 + 1:12] <- map(1:12, # model >17 save _s and _q combined
+names(list_forest)[27 + 1:13] <- map(1:13, # model >17 save _s and _q combined
                                        function(x) names(list_forest)[[27 + x]] <- name_au[x])
-list_forest[27 + 1:12] <- map(1:12, 
+list_forest[27 + 1:13] <- map(1:13, 
                                 function(x) list_forest[[27 + x]] <- combine_aptype(name_au[x]))
 
 list_forest <- list_forest[list_forest %>% names %>% complete.cases]
@@ -154,6 +155,13 @@ walk(27:length(list_forest), # model1-2 with _s and _q combined
      function (x) plot_forest(list_forest[[x]],
         str_glue('{save_forest}{names(list_forest)[[x]]}')))
 
+
+# # Compare results for global and restricted pollution scores
+# list_fit %>% names %>% head(60) 
+# list_fit[['model1_dem_s_pmcoarse']]
+# list_fit[['model1_dem_s_pm10']]
+# list_fit[['model1_dem_s_appc_all']] %>% finalfit::fit2df()
+# list_fit[['model1_dem_s_appc']] %>% finalfit::fit2df()
 
 
 # Tables for cox models -------------------------------------------------------
@@ -207,30 +215,30 @@ walk(.x = list_tables, ~ finalfit::fit2df(list_fit[[.x]], condense = F) %>%
            grepl('mdi_eng_q2nd', explanatory) ~ c('mdi 2q'), 
            grepl('mdi_eng_q3rd', explanatory) ~ c('mdi 3q'), 
            grepl('mdi_eng_q4th', explanatory) ~ c('mdi 4q'), 
-           grepl('pm25_s', explanatory) ~ c('pm$_{25}$'), 
-           grepl('pm25_q2nd', explanatory) ~ c('pm$_{25}$ 2q'), 
-           grepl('pm25_q3rd', explanatory) ~ c('pm$_{25}$ 3q'),
-           grepl('pm25_q4th', explanatory) ~ c('pm$_{25}$ 4q'), 
-           grepl('pmcoarse_s', explanatory) ~ c('pm$_{coarse}$') , 
-           grepl('pmcoarse_q2nd', explanatory) ~ c('pm$_{coarse}$ 2q'), 
-           grepl('pmcoarse_q3rd', explanatory) ~ c('pm$_{coarse}$ 3q'), 
-           grepl('pmcoarse_q4th', explanatory) ~ c('pm$_{coarse}$ 4q'), 
-           grepl('pmabs_s', explanatory) ~ c('pm$_{abs}$'), 
-           grepl('pmabs_q2nd', explanatory) ~ c('pm$_{abs}$ 2q'), 
-           grepl('pmabs_q3rd', explanatory) ~ c('pm$_{abs}$ 3q'), 
-           grepl('pmabs_q4th', explanatory) ~ c('pm$_{abs}$ 4q'), 
-           grepl('pm10_s', explanatory) ~ c('pm$_{10}$'), 
-           grepl('pm10_q2nd', explanatory) ~ c('pm$_{10}$ 2q'), 
-           grepl('pm10_q3rd', explanatory) ~ c('pm$_{10}$ 3q'), 
-           grepl('pm10_q4th', explanatory) ~ c('pm$_{10}$ 4q'), 
-           grepl('no2_s', explanatory) ~ c('no$_{2}$'), 
-           grepl('no2_q2nd', explanatory) ~ c('no$_{2}$ 2q'), 
-           grepl('no2_q3rd', explanatory) ~ c('no$_{2}$ 3q'), 
-           grepl('no2_q4th', explanatory) ~ c('no$_{2}$ 4q'), 
-           grepl('no_s', explanatory) ~ c('no'), 
-           grepl('no_q2nd', explanatory) ~ c('no 2q'), 
-           grepl('no_q3rd', explanatory) ~ c('no 3q'), 
-           grepl('no_q4th', explanatory) ~ c('no 4q'), 
+           grepl('pm25_s', explanatory) ~ c('PM$_{25} iqr$'), 
+           grepl('pm25_q2nd', explanatory) ~ c('PM$_{25}$ 2q'), 
+           grepl('pm25_q3rd', explanatory) ~ c('PM$_{25}$ 3q'),
+           grepl('pm25_q4th', explanatory) ~ c('PM$_{25}$ 4q'), 
+           grepl('pmcoarse_s', explanatory) ~ c('PM$_{coarse} iqr$') , 
+           grepl('pmcoarse_q2nd', explanatory) ~ c('PM$_{coarse}$ 2q'), 
+           grepl('pmcoarse_q3rd', explanatory) ~ c('PM$_{coarse}$ 3q'), 
+           grepl('pmcoarse_q4th', explanatory) ~ c('PM$_{coarse}$ 4q'), 
+           grepl('pmabs_s', explanatory) ~ c('PM$_{abs} iqr$'), 
+           grepl('pmabs_q2nd', explanatory) ~ c('PM$_{abs}$ 2q'), 
+           grepl('pmabs_q3rd', explanatory) ~ c('PM$_{abs}$ 3q'), 
+           grepl('pmabs_q4th', explanatory) ~ c('PM$_{abs}$ 4q'), 
+           grepl('pm10_s', explanatory) ~ c('PM$_{10} iqr$'), 
+           grepl('pm10_q2nd', explanatory) ~ c('PM$_{10}$ 2q'), 
+           grepl('pm10_q3rd', explanatory) ~ c('PM$_{10}$ 3q'), 
+           grepl('pm10_q4th', explanatory) ~ c('PM$_{10}$ 4q'), 
+           grepl('no2_s', explanatory) ~ c('NO$_{2} iqr$'), 
+           grepl('no2_q2nd', explanatory) ~ c('NO$_{2}$ 2q'), 
+           grepl('no2_q3rd', explanatory) ~ c('NO$_{2}$ 3q'), 
+           grepl('no2_q4th', explanatory) ~ c('NO$_{2}$ 4q'), 
+           grepl('no_s', explanatory) ~ c('NO iqr'), 
+           grepl('no_q2nd', explanatory) ~ c('NO 2q'), 
+           grepl('no_q3rd', explanatory) ~ c('NO 3q'), 
+           grepl('no_q4th', explanatory) ~ c('NO 4q'), 
            grepl('appc', explanatory) ~ c('pollution score'), 
            grepl('appc_all', explanatory) ~ c('pollution score (all)'), 
            grepl('noise_poll_s', explanatory) ~ c('noise pollution')
@@ -272,7 +280,7 @@ df_lasso <- lmap(list_lasso, \(x) {
 )
 df_lasso <- df_lasso  %>% bind_cols() 
 df_lasso <- df_lasso %>% slice(8:n())
-rownames(df_lasso) <- c('pm$_{25}$', 'pm$_{coarse}$', 'pm$_{abs}$', 'pm$_{10}$', 'no$_{2}$', 'no') %>%
+rownames(df_lasso) <- c('PM$_{25}$', 'PM$_{coarse}$', 'PM$_{abs}$', 'PM$_{10}$', 'NO$_{2}$', 'NO') %>%
     as.expression
 
 # Save as tables.tex
@@ -299,7 +307,7 @@ df_rc_slope <- map(c('model4', 'model5'), function(x) {
                     list_slope = list_re %>%
                         map(function(y) {y$rec_centre[, 2] %>% data.frame}) %>%
                         bind_cols
-                    names(list_slope) = c('pm_25', 'pm$_coarse$', 'pm$_abs', 'pm_$10$', 'no$_2$', 'no', 'pollution score')
+                    names(list_slope) = c('PM$_25$', 'PM$_coarse$', 'PM$_abs', 'PM$_10$', 'no$_2$', 'no', 'pollution score')
                     if (grepl('4', list_re %>% names) %>% any) {
                         list_slope['model'] = '>=1 year'
                     } else {
@@ -308,17 +316,18 @@ df_rc_slope <- map(c('model4', 'model5'), function(x) {
                     list_slope
 })
 
-# Prepare df for plotting
-new_names <- expression(pm[25], pm[coarse], pm[abs], pm[10], no[2], no, atop(pollution,score))
+
+
+# Prepare df for plotting 
+new_names <- expression(atop(pollution,score), no, no[2], pm[10], pm[abs], pm[coarse], pm[25]) # attention, axis reversed
 fig <- df_rc_slope %>% 
     bind_rows %>% 
     data.table %>% 
     melt(measure.vars = names(.) %>% head(-1)) %>%
-    ggplot(aes(x = variable,
+    ggplot(aes(x = fct_rev(variable),
                y = exp(value),
-               color = model,
-               shape = model)) +
-    geom_boxplot() +
+               color = model)) +
+    geom_boxplot(outlier.shape = NA) +
     scale_x_discrete(name = 'Pollutants',
                      labels = new_names) +
     scale_y_continuous(name = 'Hazard Ratio') +
@@ -332,33 +341,43 @@ fig <- df_rc_slope %>%
 fig %>% ggsave(file = paste0(save_re, 'boxplot_rc.eps'))
 
 # Generate tables
-df_rc_std <-  map(c('model4', 'model5'), function(x) {
-                   mask_re <- grepl(x, list_fit %>% names)
-                   list_re <- list_fit[mask_re] %>% 
-                       map(\(x) { x$vcoef %>% .[[1]] %>% .[2, 2] %>% sqrt}) %>% 
-                       unlist %>% 
-                       data.frame %>%
-                       rename(., 'sd' = .) %>%
-                       mutate(
-                              'HR scale' = exp(sd)
-                       )
-                     }) %>% bind_rows
+df_rc <-  map(c('model4', 'model5'), function(x) {
+                  mask_re = grepl(x, list_fit %>% names)
+                  list_re = list_fit[mask_re] %>% 
+                      map(\(x) {x$vcoef %>% .[[1]] %>% .[2, 2] %>% sqrt %>% round(3)}) %>% 
+                      unlist %>% 
+                      data.frame %>%
+                      rename(., 'sd' = .) %>%
+                      mutate( 'sd (HR scale)' = exp(sd))
+                  list_re['HR mean'] = list_fit[mask_re] %>% 
+                      map(\(x) {x$frail %>% .[[1]] %>% .[, 2] %>% exp %>% mean %>% round(3)}) %>% 
+                      unlist %>%
+                      data.frame
+                  list_re
+                  }) %>% bind_rows
+
+
 
 # Rename indexes
 rc_names <- map(c('$\\geq1$ year', '$\\geq5$ years'), \(x) {
-                    map(c('pm$_{25}$', 'pm$_{coarse}$', 'pm$_{abs}$', 'pm$_{10}$', 'no$_{2}$', 'no', 'pollution score'), \(y) {
+                    map(c('PM$_{25}$', 'PM$_{coarse}$', 'PM$_{abs}$', 'PM$_{10}$', 'NO$_{2}$', 'NO', 'pollution score'), \(y) {
                             str_glue('{y} {x}')
                        }) %>% unlist
                      }
 ) %>% unlist
-rownames(df_rc_std) <- rc_names
+rownames(df_rc) <- rc_names
+
+# Reorder indexes
+n_poll <- nrow(df_rc) / 2
+reorder <- rep(c(1:n_poll), each=2)
+reorder[seq(2, n_poll * 2, 2)] <- reorder[seq(2, n_poll * 2, 2)] + n_poll
+df_rc <- df_rc[reorder,]
 
 # Save as tables.tex
-df_rc_std %>%
+df_rc %>%
     kable(format = 'latex', digits = 4, escape = F, booktabs = T) %>%
     kable_styling(latex_options = "striped") %>% 
     kableExtra::save_kable(str_glue('{save_re}tc_table.tex'))
-
 
 
 # Proportional Hazards check results ------------------------------------------------
@@ -454,7 +473,7 @@ if (!file.exists(save_negative)) {
 # model 11: Negative control with alcohol consumption frequency (without mdi_eng)
 # model 12: (11) + mdi_eng
 # model 13: (12) + address_buff = 5
-list_apoll <- paste(c('pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'no'), collapse = '|')  
+list_apoll <- paste(c('pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'no', 'appc'), collapse = '|')  
 list_negative <- as.list(rep(NA, 20))
 idx <- 1
 #for (model in as.character(c(12:15))) {
@@ -506,8 +525,8 @@ df_negative <- lmap(list_negative, function(x) {
 # Prepare df indexes and columns
 rownames(df_negative) <- df_negative[, 'pollutant']
 df_negative <- df_negative  %>% mutate(pollutant = NULL)
-new_idx <- vec_rep_each(1:6, 2)
-new_idx[seq(2, 12, 2)] <- new_idx[seq(2, 12, 2)] + 6
+new_idx <- vec_rep_each(1:7, 2)
+new_idx[seq(2, 14, 2)] <- new_idx[seq(2, 14, 2)] + 7
 df_negative <- df_negative[new_idx, ]
 
 df_negative %>% 
@@ -528,7 +547,7 @@ list_interaction <- list_fit[grep(paste(c('model19', 'model20'), collapse = '|')
 interactions_ <- map(list_interaction, function(x) { 
                          coef_fit = x %>% coef
                          ap_exposure = coef_fit %>% names %>% .[length(coef_fit) - 3]
-                         int_ = interactionR(x, exposure_names = c(ap_exposure, 'mdi_eng_q4th'))
+                         int_ = interactionR(x, exposure_names = c('mdi_eng_q4th', ap_exposure))
                          int_ = int_$dframe[c(1, 2, 3, 4, 7, 8),]
                          return(int_)
             }

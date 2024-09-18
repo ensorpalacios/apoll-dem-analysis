@@ -43,6 +43,7 @@ plot_forest <- function(df_data, save_name) {
                     pad = '0',
                     side = 'right'
                 ),
+                round(p, 2) == 1 ~ as.character('1.00'),
                 TRUE ~ str_pad(
                     as.character(round(p, 2)),
                     width = 4,
@@ -52,12 +53,12 @@ plot_forest <- function(df_data, save_name) {
             .keep = 'all')
 
     # Rename air pollutants
-    new_names <- c('"pm"[25]', '"pm"[25]*" 2q" ', '"pm"[25]*" 3q"', '"pm"[25]*" 4q"',
-        '"pm"[coarse]', '"pm"[coarse]*" 2q"', '"pm"[coarse]*" 3q"', '"pm"[coarse]*" 4q"',
-        '"pm"[abs]', '"pm"[abs]*" 2q"', '"pm"[abs]*" 3q"', '"pm"[abs]*" 4q"',
-        '"pm"["10"]', '"pm"[10]*" 2q"', '"pm"[10]*" 3q"', '"pm"[10]*" 4q"',
-        '"no"[2]', '"no"[2]*" 2q"', '"no"[2]*" 3q"', '"no"[2]*" 4q"',
-        'no', '"no 2q"', '"no 3q"', '"no 4q"',
+    new_names <- c('"PM"[25]*" iqr"', '"PM"[25]*" 2q" ', '"PM"[25]*" 3q"', '"PM"[25]*" 4q"',
+        '"PM"[coarse]*" iqr"', '"PM"[coarse]*" 2q"', '"PM"[coarse]*" 3q"', '"PM"[coarse]*" 4q"',
+        '"PM"[abs]*" iqr"', '"PM"[abs]*" 2q"', '"PM"[abs]*" 3q"', '"PM"[abs]*" 4q"',
+        '"PM"["10"]*" iqr"', '"PM"[10]*" 2q"', '"PM"[10]*" 3q"', '"PM"[10]*" 4q"',
+        '"NO"[2]*" iqr"', '"NO"[2]*" 2q"', '"NO"[2]*" 3q"', '"NO"[2]*" 4q"',
+        '"NO iqr"', '"NO 2q"', '"NO 3q"', '"NO 4q"',
         '"pollution score"'
     ) %>% as.expression
     levels(df_data$explanatory) <- new_names
@@ -104,7 +105,8 @@ plot_forest <- function(df_data, save_name) {
               axis.ticks.y = element_blank(),
               axis.text.y = element_blank(),
               axis.title.y = element_blank(),
-              legend.position = "none")
+              legend.position = "none") +
+        labs(x = "HR")
 
     # Plot p-values 
     plot_right <- df_data %>% 
