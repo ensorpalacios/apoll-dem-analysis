@@ -18,7 +18,7 @@ and finally run the docker container:
 
 You are now within a container and are ready to run the analysis.
 
-Analysis scripts
+Analysis scripts (folder "scr")
 
 - data_prepare.R: script to clean and recode phenotipic data contained in the /data/raw/data_participant.csv; the output is saved in the /data/processed/df_ukbb.rds.
 
