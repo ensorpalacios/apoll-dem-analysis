@@ -473,7 +473,7 @@ if (!file.exists(save_negative)) {
 # model 11: Negative control with alcohol consumption frequency (without mdi_eng)
 # model 12: (11) + mdi_eng
 # model 13: (12) + address_buff = 5
-list_apoll <- paste(c('pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'no', 'appc'), collapse = '|')  
+list_apoll <- paste(c('pm25', 'pmabs', 'pmcoarse', 'pm10', 'no2', 'no', 'appc'), collapse = '|')
 list_negative <- as.list(rep(NA, 20))
 idx <- 1
 #for (model in as.character(c(12:15))) {
@@ -482,9 +482,12 @@ for (model in as.character(c(12:13))) {
     if (!is_empty(idx_cat)) {
         # Get aggregated data
         names_cat <- names(list_aggregate)[idx_cat]
-        list_tidy <- map(list_aggregate[names_cat], \(x) confint.default(x) %>% exp %>% as.data.frame)
+        list_tidy <- map(list_aggregate[names_cat], \(x) {
+                             df_confint = confint.default(x) %>% exp %>% as.data.frame
+                             df_confint['OR'] = x$coef %>% exp
+                             df_confint})
         list_tidy <- list_tidy %>% reduce(rbind) %>% round(digits = 2)
-        colnames(list_tidy) <- c('L95', 'U95')
+        colnames(list_tidy) <- c('L95', 'U95', 'OR')
         var_mask <-  list_tidy %>% rownames %>% grep(list_apoll, .)
         table_fits <- list_tidy[var_mask,]
 
@@ -518,7 +521,7 @@ df_negative <- lmap(list_negative, function(x) {
                         model_ = model_ %>%
                             mutate(model = model_name,
                                    pollutant = poll_names)
-                        model_ = model_ %>% .[, c('model', 'pollutant', 'L95', 'U95')]
+                        model_ = model_ %>% .[, c('model', 'pollutant', 'OR', 'L95', 'U95')]
     }
 ) %>% bind_rows
 
@@ -571,4 +574,35 @@ walk(seq(1, length(interactions_)), function(x) {
              kable_styling(latex_options = "striped") %>% 
              kableExtra::save_kable(str_glue('{save_int}{model_names[[x]]}.tex'))
 })
+
+# Compare Dementia and COPD results (5 vs 1 years with IMD) -------------------
+# Saving directory
+save_positive <-  here(str_glue('output/results/cox/display/positive_control/'))
+if (!file.exists(save_positive)) {
+    dir.create(save_positive, recursive = TRUE)
+}
+
+# Make dataframe
+diff_apoll <- list_forest$model3_dem$HR - list_forest$model2_dem$HR %>% as.data.frame()
+colnames(diff_apoll)  <-  'apoll'
+
+diff_copd <- list_forest$model11_copd$HR - list_forest$model10_copd$HR %>% as.data.frame()
+colnames(diff_copd)  <-  'copd'
+
+diff_df <- cbind(diff_copd, diff_apoll)
+
+# Plot histograms
+hist_plot <- ggplot(diff_df) + 
+    geom_histogram(aes(x=apoll, fill='apoll'), alpha=1) +
+    geom_histogram(aes(x=copd, fill='copd'), alpha=0.5) +
+    geom_vline(aes(xintercept=mean(apoll)), color='orangered2', linetype="dashed", linewidth=1) +
+    geom_vline(aes(xintercept=mean(copd)), color='deepskyblue2', linetype="dashed",linewidth=1) +
+    scale_fill_discrete(name="Outcome", labels = c('air pollution', 'COPD'))
+
+# Save figure
+hist_plot %>% ggsave(file = paste0(save_positive, 'hist_5vs1.eps'), device = cairo_ps)
+
+# Test for equivalence in 5 vs 1 difference across outcomes
+wilctest <- wilcox.test(diff_df$copd, diff_df$apoll, paired=T)
+saveRDS(wilctest, file = paste0(save_positive, 'wilctest.rdata.rds'))
 
