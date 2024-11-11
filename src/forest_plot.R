@@ -53,7 +53,7 @@ plot_forest <- function(df_data, save_name) {
             .keep = 'all')
 
     # Rename air pollutants
-    new_names <- c('"PM"[25]*" iqr"', '"PM"[25]*" 2q" ', '"PM"[25]*" 3q"', '"PM"[25]*" 4q"',
+    new_names <- c('"PM"[2.5]*" iqr"', '"PM"[2.5]*" 2q" ', '"PM"[2.5]*" 3q"', '"PM"[2.5]*" 4q"',
         '"PM"[coarse]*" iqr"', '"PM"[coarse]*" 2q"', '"PM"[coarse]*" 3q"', '"PM"[coarse]*" 4q"',
         '"PM"[abs]*" iqr"', '"PM"[abs]*" 2q"', '"PM"[abs]*" 3q"', '"PM"[abs]*" 4q"',
         '"PM"["10"]*" iqr"', '"PM"[10]*" 2q"', '"PM"[10]*" 3q"', '"PM"[10]*" 4q"',

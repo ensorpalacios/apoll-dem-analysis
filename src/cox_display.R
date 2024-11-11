@@ -215,10 +215,10 @@ walk(.x = list_tables, ~ finalfit::fit2df(list_fit[[.x]], condense = F) %>%
            grepl('mdi_eng_q2nd', explanatory) ~ c('mdi 2q'), 
            grepl('mdi_eng_q3rd', explanatory) ~ c('mdi 3q'), 
            grepl('mdi_eng_q4th', explanatory) ~ c('mdi 4q'), 
-           grepl('pm25_s', explanatory) ~ c('PM$_{25} iqr$'), 
-           grepl('pm25_q2nd', explanatory) ~ c('PM$_{25}$ 2q'), 
-           grepl('pm25_q3rd', explanatory) ~ c('PM$_{25}$ 3q'),
-           grepl('pm25_q4th', explanatory) ~ c('PM$_{25}$ 4q'), 
+           grepl('pm25_s', explanatory) ~ c('PM$_{2.5} iqr$'), 
+           grepl('pm25_q2nd', explanatory) ~ c('PM$_{2.5}$ 2q'), 
+           grepl('pm25_q3rd', explanatory) ~ c('PM$_{2.5}$ 3q'),
+           grepl('pm25_q4th', explanatory) ~ c('PM$_{2.5}$ 4q'), 
            grepl('pmcoarse_s', explanatory) ~ c('PM$_{coarse} iqr$') , 
            grepl('pmcoarse_q2nd', explanatory) ~ c('PM$_{coarse}$ 2q'), 
            grepl('pmcoarse_q3rd', explanatory) ~ c('PM$_{coarse}$ 3q'), 
@@ -280,7 +280,7 @@ df_lasso <- lmap(list_lasso, \(x) {
 )
 df_lasso <- df_lasso  %>% bind_cols() 
 df_lasso <- df_lasso %>% slice(8:n())
-rownames(df_lasso) <- c('PM$_{25}$', 'PM$_{coarse}$', 'PM$_{abs}$', 'PM$_{10}$', 'NO$_{2}$', 'NO') %>%
+rownames(df_lasso) <- c('PM$_{2.5}$', 'PM$_{coarse}$', 'PM$_{abs}$', 'PM$_{10}$', 'NO$_{2}$', 'NO') %>%
     as.expression
 
 # Save as tables.tex
@@ -307,7 +307,7 @@ df_rc_slope <- map(c('model4', 'model5'), function(x) {
                     list_slope = list_re %>%
                         map(function(y) {y$rec_centre[, 2] %>% data.frame}) %>%
                         bind_cols
-                    names(list_slope) = c('PM$_25$', 'PM$_coarse$', 'PM$_abs', 'PM$_10$', 'no$_2$', 'no', 'pollution score')
+                    names(list_slope) = c('PM$_2.5$', 'PM$_coarse$', 'PM$_abs', 'PM$_10$', 'no$_2$', 'no', 'pollution score')
                     if (grepl('4', list_re %>% names) %>% any) {
                         list_slope['model'] = '>=1 year'
                     } else {
@@ -360,7 +360,7 @@ df_rc <-  map(c('model4', 'model5'), function(x) {
 
 # Rename indexes
 rc_names <- map(c('$\\geq1$ year', '$\\geq5$ years'), \(x) {
-                    map(c('PM$_{25}$', 'PM$_{coarse}$', 'PM$_{abs}$', 'PM$_{10}$', 'NO$_{2}$', 'NO', 'pollution score'), \(y) {
+                    map(c('PM$_{2.5}$', 'PM$_{coarse}$', 'PM$_{abs}$', 'PM$_{10}$', 'NO$_{2}$', 'NO', 'pollution score'), \(y) {
                             str_glue('{y} {x}')
                        }) %>% unlist
                      }
@@ -583,26 +583,26 @@ if (!file.exists(save_positive)) {
 }
 
 # Make dataframe
-diff_apoll <- list_forest$model3_dem$HR - list_forest$model2_dem$HR %>% as.data.frame()
-colnames(diff_apoll)  <-  'apoll'
+diff_dem <- list_forest$model3_dem$HR - list_forest$model2_dem$HR %>% as.data.frame()
+colnames(diff_dem)  <-  'dem'
 
 diff_copd <- list_forest$model11_copd$HR - list_forest$model10_copd$HR %>% as.data.frame()
 colnames(diff_copd)  <-  'copd'
 
-diff_df <- cbind(diff_copd, diff_apoll)
+diff_df <- cbind(diff_copd, diff_dem)
 
 # Plot histograms
 hist_plot <- ggplot(diff_df) + 
-    geom_histogram(aes(x=apoll, fill='apoll'), alpha=1) +
+    geom_histogram(aes(x=dem, fill='dem'), alpha=1) +
     geom_histogram(aes(x=copd, fill='copd'), alpha=0.5) +
-    geom_vline(aes(xintercept=mean(apoll)), color='orangered2', linetype="dashed", linewidth=1) +
-    geom_vline(aes(xintercept=mean(copd)), color='deepskyblue2', linetype="dashed",linewidth=1) +
-    scale_fill_discrete(name="Outcome", labels = c('air pollution', 'COPD'))
+    geom_vline(aes(xintercept=mean(dem)), color='deepskyblue2', linetype="dashed", linewidth=1) +
+    geom_vline(aes(xintercept=mean(copd)), color='orangered2', linetype="dashed",linewidth=1) +
+    scale_fill_discrete(name="Outcome", labels = c('COPD', 'all-cause dementia'))
 
 # Save figure
 hist_plot %>% ggsave(file = paste0(save_positive, 'hist_5vs1.eps'), device = cairo_ps)
 
 # Test for equivalence in 5 vs 1 difference across outcomes
-wilctest <- wilcox.test(diff_df$copd, diff_df$apoll, paired=T)
+wilctest <- wilcox.test(diff_df$copd, diff_df$dem, paired=F)
 saveRDS(wilctest, file = paste0(save_positive, 'wilctest.rdata.rds'))
 
