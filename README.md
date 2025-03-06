@@ -6,7 +6,7 @@ Steps to setup the analysis from UKB RAP
 
 From within UKB Rap run ttyd command to open a web-based terminal as a DNAnexux job; set as output location the project containing the .dataset file. Advised instance settings are mem1_ssd1_v2_x8 or higher and priority=high. From within the DNAnexus job, donwload the ukbb_analysis folder (including analysis scripts and data) and the docker image:
 
-```dx download ukbb_analysis docker_image.tar.gz```
+```dx download -r ukbb_analysis docker_image.tar.gz```
 
 then load the docker image:
 
@@ -14,7 +14,10 @@ then load the docker image:
 
 and finally run the docker container:
 
-``` chmod +x ukbb_analysis/init_container.sh ```
+``` 
+chmod +x ukbb_analysis/init_container.sh
+./ukbb_analysis/init_container.sh
+```
 
 You are now within a container and are ready to run the analysis.
 
