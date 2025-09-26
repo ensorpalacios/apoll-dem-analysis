@@ -7,7 +7,7 @@
 #' dementia)
 #'
 #' @author Ensor Palacios, \email{ensorrafael.palacios@@bristol.ac.uk}
-#f
+#'
 #' ----------------------------------------------------------------------------
 
 # install and import libraries
